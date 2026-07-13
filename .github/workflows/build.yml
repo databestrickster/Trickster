@@ -154,16 +154,18 @@ jobs:
           }
           EOF
 
-      - name: Web2APK - Create Java source files
+      - name: Web2APK - Create Java source files (fixed)
         if: env.type == 'web2apk'
         run: |
           mkdir -p project/app/src/main/java/com/web2apk/app
-          cat > project/app/src/main/java/com/web2apk/app/MainActivity.java <<EOF
+          cat > project/app/src/main/java/com/web2apk/app/MainActivity.java <<'EOF'
           package com.web2apk.app;
+
           import android.annotation.SuppressLint;
           import android.app.DownloadManager;
           import android.content.Intent;
           import android.net.Uri;
+          import android.os.Build;
           import android.os.Bundle;
           import android.os.Environment;
           import android.view.View;
@@ -178,16 +180,19 @@ jobs:
           import androidx.appcompat.app.AppCompatActivity;
           import androidx.appcompat.widget.Toolbar;
           import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
           public class MainActivity extends AppCompatActivity {
               private static final String WEBSITE_URL = "URL_PLACEHOLDER";
               private WebView webView;
               private ProgressBar progressBar;
               private SwipeRefreshLayout swipeRefreshLayout;
+
               @SuppressLint("SetJavaScriptEnabled")
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
+
                   webView = findViewById(R.id.webView);
                   progressBar = findViewById(R.id.progressBar);
                   swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
@@ -196,10 +201,17 @@ jobs:
                   if (getSupportActionBar() != null) {
                       getSupportActionBar().setTitle(getString(R.string.app_name));
                   }
+
                   setupWebView();
                   swipeRefreshLayout.setOnRefreshListener(() -> webView.reload());
-                  webView.loadUrl(WEBSITE_URL);
+
+                  String url = WEBSITE_URL;
+                  if (url == null || url.isEmpty()) {
+                      url = "about:blank";
+                  }
+                  webView.loadUrl(url);
               }
+
               @SuppressLint("SetJavaScriptEnabled")
               private void setupWebView() {
                   WebSettings settings = webView.getSettings();
@@ -214,19 +226,38 @@ jobs:
                   settings.setBuiltInZoomControls(false);
                   settings.setDisplayZoomControls(false);
                   settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
                   CookieManager cookieManager = CookieManager.getInstance();
                   cookieManager.setAcceptCookie(true);
-                  cookieManager.setAcceptThirdPartyCookies(webView, true);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                      cookieManager.setAcceptThirdPartyCookies(webView, true);
+                  }
+
                   webView.setWebViewClient(new WebViewClient() {
                       @Override
                       public void onPageFinished(WebView view, String url) {
                           progressBar.setVisibility(View.GONE);
                           swipeRefreshLayout.setRefreshing(false);
                       }
+
+                      // Untuk Android < 24 (deprecated method)
+                      @SuppressWarnings("deprecation")
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                          return handleUrl(url);
+                      }
+
+                      // Untuk Android >= 24
                       @Override
                       public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                           String url = request.getUrl().toString();
-                          if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("intent:") || url.startsWith("whatsapp:")) {
+                          return handleUrl(url);
+                      }
+
+                      private boolean handleUrl(String url) {
+                          if (url.startsWith("tel:") || url.startsWith("mailto:") ||
+                              url.startsWith("intent:") || url.startsWith("whatsapp:")) {
                               try {
                                   startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                               } catch (Exception ignored) {}
@@ -235,6 +266,7 @@ jobs:
                           return false;
                       }
                   });
+
                   webView.setWebChromeClient(new WebChromeClient() {
                       @Override
                       public void onProgressChanged(WebView view, int progress) {
@@ -246,18 +278,20 @@ jobs:
                           }
                       }
                   });
-                  webView.setDownloadListener(new DownloadListener() {
-                      @Override
-                      public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimetype, long contentLength) {
-                          DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-                          request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                          request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, contentDisposition);
-                          DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+
+                  webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+                      DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                      request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                      request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, contentDisposition);
+                      DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                      if (dm != null) {
                           dm.enqueue(request);
                       }
                   });
+
                   webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
               }
+
               @Override
               public void onBackPressed() {
                   if (webView != null && webView.canGoBack()) {
@@ -266,15 +300,19 @@ jobs:
                   }
                   super.onBackPressed();
               }
+
               @Override
               protected void onResume() {
                   if (webView != null) webView.onResume();
+                  super.onResume();
               }
+
               @Override
               protected void onPause() {
                   if (webView != null) webView.onPause();
                   super.onPause();
               }
+
               @Override
               protected void onDestroy() {
                   if (webView != null) webView.destroy();
@@ -303,16 +341,21 @@ jobs:
           }
           EOF
 
-      - name: Web2APK - Create AndroidManifest.xml and layouts
+      - name: Web2APK - Create AndroidManifest.xml and layouts (fixed)
         if: env.type == 'web2apk'
         run: |
           mkdir -p project/app/src/main/res/layout
           mkdir -p project/app/src/main/res/values
-          cat > project/app/src/main/AndroidManifest.xml <<EOF
+          cat > project/app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                  android:maxSdkVersion="28" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+                  android:maxSdkVersion="28" />
+
               <application
                   android:allowBackup="true"
                   android:hardwareAccelerated="true"
@@ -434,10 +477,11 @@ jobs:
           </resources>
           EOF
 
-      - name: Web2APK - Apply URL, app name, icons, and keystore
+      - name: Web2APK - Apply URL, app name, icons, and keystore (fixed URL sed)
         if: env.type == 'web2apk'
         run: |
-          sed -i "s|URL_PLACEHOLDER|${{ env.url }}|g" project/app/src/main/java/com/web2apk/app/MainActivity.java
+          # Ganti URL dengan delimiter # agar aman dengan slash
+          sed -i "s#URL_PLACEHOLDER#${{ env.url }}#g" project/app/src/main/java/com/web2apk/app/MainActivity.java
           sed -i "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${{ env.app_name }}</string>|g" project/app/src/main/res/values/strings.xml
           if [ ! -f build-assets/icon.png ] || ! file build-assets/icon.png | grep -q PNG; then
             echo "⚠️ Icon tidak valid, membuat default..."
@@ -502,38 +546,187 @@ jobs:
             exit 1
           fi
 
-      - name: Fix Flutter signing configuration (supports build.gradle & build.gradle.kts)
+      - name: Generate Flutter app icons (fix invalid PNG & support all formats)
+        if: env.type == 'flutter'
+        run: |
+          cd flutter-project
+          MIPMAP_DIRS="mipmap-hdpi mipmap-mdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi"
+
+          # Fungsi untuk mengonversi file ke PNG
+          convert_to_png() {
+            local src="$1"
+            local dst="$2"
+            if [ -f "$src" ]; then
+              echo "Converting $src to $dst"
+              convert "$src" "$dst" 2>/dev/null && return 0 || return 1
+            else
+              return 1
+            fi
+          }
+
+          # 1. Deteksi dan konversi semua file ic_launcher.* (selain .png) ke .png
+          for dir in $MIPMAP_DIRS; do
+            RES_DIR="android/app/src/main/res/$dir"
+            # Konversi ic_launcher.* selain .png
+            find "$RES_DIR" -maxdepth 1 -name "ic_launcher.*" ! -name "ic_launcher.png" -print0 | while IFS= read -r -d '' file; do
+              echo "Found $file, converting to PNG"
+              convert_to_png "$file" "$RES_DIR/ic_launcher.png" && rm -f "$file"
+            done
+            # Konversi ic_launcher_round.* selain .png
+            find "$RES_DIR" -maxdepth 1 -name "ic_launcher_round.*" ! -name "ic_launcher_round.png" -print0 | while IFS= read -r -d '' file; do
+              echo "Found $file, converting to PNG"
+              convert_to_png "$file" "$RES_DIR/ic_launcher_round.png" && rm -f "$file"
+            done
+          done
+
+          # 2. Validasi semua file ic_launcher.png (dan round) apakah valid
+          NEEDS_REGEN=false
+          for dir in $MIPMAP_DIRS; do
+            PNG_FILE="android/app/src/main/res/$dir/ic_launcher.png"
+            if [ ! -f "$PNG_FILE" ]; then
+              NEEDS_REGEN=true
+              break
+            fi
+            if ! file "$PNG_FILE" | grep -q PNG || ! identify "$PNG_FILE" &>/dev/null; then
+              NEEDS_REGEN=true
+              break
+            fi
+          done
+
+          if [ "$NEEDS_REGEN" = false ]; then
+            echo "✅ Icons already exist and valid, skipping."
+            exit 0
+          fi
+
+          echo "⚠️ Icons missing or invalid. Attempting to fix by converting existing files..."
+
+          # 3. Coba perbaiki file PNG yang ada (mungkin korup) dengan convert
+          CONVERT_SUCCESS=false
+          for dir in $MIPMAP_DIRS; do
+            PNG_FILE="android/app/src/main/res/$dir/ic_launcher.png"
+            if [ -f "$PNG_FILE" ]; then
+              if convert "$PNG_FILE" "$PNG_FILE" 2>/dev/null; then
+                CONVERT_SUCCESS=true
+              fi
+            fi
+          done
+
+          if [ "$CONVERT_SUCCESS" = true ]; then
+            ALL_VALID=true
+            for dir in $MIPMAP_DIRS; do
+              PNG_FILE="android/app/src/main/res/$dir/ic_launcher.png"
+              if [ ! -f "$PNG_FILE" ] || ! file "$PNG_FILE" | grep -q PNG || ! identify "$PNG_FILE" &>/dev/null; then
+                ALL_VALID=false
+                break
+              fi
+            done
+            if [ "$ALL_VALID" = true ]; then
+              echo "✅ Icons repaired successfully."
+              for dir in $MIPMAP_DIRS; do
+                ROUND_FILE="android/app/src/main/res/$dir/ic_launcher_round.png"
+                [ -f "$ROUND_FILE" ] && convert "$ROUND_FILE" "$ROUND_FILE" 2>/dev/null || true
+              done
+              exit 0
+            fi
+          fi
+
+          # 4. Regenerasi dari build-assets (cari berbagai format)
+          echo "Regenerating icons from build-assets/..."
+
+          for dir in $MIPMAP_DIRS; do
+            rm -f android/app/src/main/res/$dir/ic_launcher.*
+          done
+
+          # Cari file icon di build-assets dengan berbagai ekstensi
+          ICON_SRC=""
+          for ext in png jpg jpeg webp bmp gif tiff; do
+            if [ -f "../build-assets/icon.$ext" ]; then
+              if [ "$ext" != "png" ]; then
+                convert "../build-assets/icon.$ext" "../build-assets/icon_temp.png" && ICON_SRC="../build-assets/icon_temp.png"
+              else
+                ICON_SRC="../build-assets/icon.png"
+              fi
+              break
+            fi
+          done
+
+          if [ -z "$ICON_SRC" ] || [ ! -f "$ICON_SRC" ]; then
+            echo "⚠️ No valid icon found, creating default blue icon..."
+            convert -size 512x512 xc:blue ../build-assets/icon.png
+            ICON_SRC="../build-assets/icon.png"
+          fi
+
+          echo "Using icon source: $ICON_SRC"
+
+          for dir in $MIPMAP_DIRS; do
+            mkdir -p "android/app/src/main/res/$dir"
+          done
+
+          convert "$ICON_SRC" -resize 72x72   android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          convert "$ICON_SRC" -resize 48x48   android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          convert "$ICON_SRC" -resize 96x96   android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          convert "$ICON_SRC" -resize 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          convert "$ICON_SRC" -resize 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          for dir in $MIPMAP_DIRS; do
+            cp "android/app/src/main/res/$dir/ic_launcher.png" \
+               "android/app/src/main/res/$dir/ic_launcher_round.png"
+          done
+
+          echo "✅ Icons regenerated successfully."
+
+      - name: Fix Flutter Android configuration (compileSdk 36 & signing)
         if: env.type == 'flutter'
         run: |
           cd flutter-project/android/app
-          # Salin keystore yang sudah digenerate ke folder app
+          # Salin keystore
           cp ../../../release.keystore .
 
-          # Tentukan file gradle yang digunakan
+          # Perbaiki compileSdk dan targetSdk ke 36
           if [ -f build.gradle ]; then
-            GRADLE_FILE="build.gradle"
-            # Groovy DSL: storeFile file("...")
-            sed -i 's|storeFile file(".*")|storeFile file("release.keystore")|g' "$GRADLE_FILE"
-            sed -i 's|storePassword ".*"|storePassword "password"|g' "$GRADLE_FILE"
-            sed -i 's|keyAlias ".*"|keyAlias "release"|g' "$GRADLE_FILE"
-            sed -i 's|keyPassword ".*"|keyPassword "password"|g' "$GRADLE_FILE"
-            echo "Updated signing config in build.gradle (Groovy DSL)"
+            sed -i 's/compileSdk [0-9]*/compileSdk 36/g' build.gradle
+            sed -i 's/targetSdk [0-9]*/targetSdk 36/g' build.gradle
+            # Signing config
+            sed -i 's|storeFile file(".*")|storeFile file("release.keystore")|g' build.gradle
+            sed -i 's|storePassword ".*"|storePassword "password"|g' build.gradle
+            sed -i 's|keyAlias ".*"|keyAlias "release"|g' build.gradle
+            sed -i 's|keyPassword ".*"|keyPassword "password"|g' build.gradle
           elif [ -f build.gradle.kts ]; then
-            GRADLE_FILE="build.gradle.kts"
-            # Kotlin DSL: storeFile = file("...") or storeFile.set(file("..."))
-            # Ganti semua kemungkinan
-            sed -i 's|storeFile = file(".*")|storeFile = file("release.keystore")|g' "$GRADLE_FILE"
-            sed -i 's|storeFile.set(file(".*"))|storeFile.set(file("release.keystore"))|g' "$GRADLE_FILE"
-            sed -i 's|storePassword = ".*"|storePassword = "password"|g' "$GRADLE_FILE"
-            sed -i 's|storePassword.set(".*")|storePassword.set("password")|g' "$GRADLE_FILE"
-            sed -i 's|keyAlias = ".*"|keyAlias = "release"|g' "$GRADLE_FILE"
-            sed -i 's|keyAlias.set(".*")|keyAlias.set("release")|g' "$GRADLE_FILE"
-            sed -i 's|keyPassword = ".*"|keyPassword = "password"|g' "$GRADLE_FILE"
-            sed -i 's|keyPassword.set(".*")|keyPassword.set("password")|g' "$GRADLE_FILE"
-            echo "Updated signing config in build.gradle.kts (Kotlin DSL)"
+            sed -i 's/compileSdk = [0-9]*/compileSdk = 36/g' build.gradle.kts
+            sed -i 's/targetSdk = [0-9]*/targetSdk = 36/g' build.gradle.kts
+            sed -i 's|storeFile = file(".*")|storeFile = file("release.keystore")|g' build.gradle.kts
+            sed -i 's|storeFile.set(file(".*"))|storeFile.set(file("release.keystore"))|g' build.gradle.kts
+            sed -i 's|storePassword = ".*"|storePassword = "password"|g' build.gradle.kts
+            sed -i 's|storePassword.set(".*")|storePassword.set("password")|g' build.gradle.kts
+            sed -i 's|keyAlias = ".*"|keyAlias = "release"|g' build.gradle.kts
+            sed -i 's|keyAlias.set(".*")|keyAlias.set("release")|g' build.gradle.kts
+            sed -i 's|keyPassword = ".*"|keyPassword = "password"|g' build.gradle.kts
+            sed -i 's|keyPassword.set(".*")|keyPassword.set("password")|g' build.gradle.kts
           else
-            echo "Neither build.gradle nor build.gradle.kts found in android/app/"
+            echo "Tidak ditemukan build.gradle atau build.gradle.kts"
             exit 1
+          fi
+
+      - name: Detect and set Gradle version for Flutter
+        if: env.type == 'flutter'
+        run: |
+          cd flutter-project/android
+          if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
+            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed -n 's/.*gradle-\([0-9.]*\)-.*/\1/p')
+            echo "Detected required Gradle version from wrapper: $GRADLE_VERSION"
+            CURRENT_GRADLE=$(gradle --version | grep "Gradle" | head -n1 | awk '{print $NF}' || echo "unknown")
+            echo "Currently installed Gradle: $CURRENT_GRADLE"
+            if [ -n "$GRADLE_VERSION" ] && [ "$GRADLE_VERSION" != "$CURRENT_GRADLE" ]; then
+              echo "Installing Gradle $GRADLE_VERSION (upgrade/downgrade)"
+              source "$HOME/.sdkman/bin/sdkman-init.sh"
+              yes | sdk install gradle $GRADLE_VERSION
+              sdk use gradle $GRADLE_VERSION
+              echo "✅ Gradle $GRADLE_VERSION installed and set."
+            else
+              echo "✅ Gradle version matches required version or not detected, skipping."
+            fi
+          else
+            echo "No gradle-wrapper.properties found, using default gradle."
           fi
 
       - name: Detect Flutter version from pubspec
@@ -544,7 +737,7 @@ jobs:
           set -e
           PUBSPEC="flutter-project/pubspec.yaml"
 
-          SDK_LINE=$(grep -A2 '^environment:' "$PUBSPEC" | grep 'sdk:' | head -n1 | sed 's/.*sdk:[[:space:]]*//; s/["\'\'']//g' || true)
+          SDK_LINE=$(grep -A2 '^environment:' "$PUBSPEC" | grep 'sdk:' | head -n1 | sed 's/.*sdk:[[:space:]]*//; s/["'\'']//g' || true)
           echo "Detected SDK constraint: $SDK_LINE"
 
           FLUTTER_VERSION="3.27.0"
@@ -635,7 +828,6 @@ jobs:
         if: env.type == 'flutter'
         shell: bash
         run: |
-          set -e
           cd flutter-project
 
           echo "=== Flutter Version ==="
@@ -648,14 +840,35 @@ jobs:
           RETRY_COUNT=0
           SUCCESS=false
 
-          try_pub_get() {
-            flutter pub get 2>&1 | tee "$PUB_LOG"
-            return ${PIPESTATUS[0]}
+          # Fungsi perbaikan kode (tidak menyebabkan exit)
+          fix_code_issues() {
+            echo "=== Auto-fixing code issues ==="
+            local CHANGED=0
+
+            # 1. Tambahkan dependency http jika belum ada
+            if ! grep -q "^  http:" pubspec.yaml; then
+              echo "Menambahkan dependency http ke pubspec.yaml"
+              sed -i '/dependencies:/a \ \ http: ^1.2.0' pubspec.yaml
+              CHANGED=1
+            fi
+
+            # 2. Cari file yang pakai http. dan tambahkan import jika perlu
+            # Gunakan while read untuk menangani spasi
+            grep -rl "http\.[a-zA-Z]" lib/ --include="*.dart" 2>/dev/null | while IFS= read -r FILE; do
+              if [ -f "$FILE" ] && ! grep -q "import.*http" "$FILE"; then
+                echo "Menambahkan import http ke $FILE"
+                sed -i '1i import \x27package:http/http.dart\x27 as http;' "$FILE"
+                CHANGED=1
+              fi
+            done
+
+            # Simpan flag ke file agar bisa dibaca di luar fungsi
+            echo "$CHANGED" > /tmp/changed_flag
           }
 
+          # Fungsi perbaikan pubspec (plugin version)
           auto_fix_pubspec() {
             local FIXED=false
-
             echo "=== Auto-fixing pubspec.yaml ==="
 
             if grep -q "requires SDK version" "$PUB_LOG" || grep -q "requires Dart SDK version" "$PUB_LOG"; then
@@ -734,6 +947,11 @@ jobs:
             fi
           }
 
+          try_pub_get() {
+            flutter pub get 2>&1 | tee "$PUB_LOG"
+            return ${PIPESTATUS[0]}
+          }
+
           while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
             RETRY_COUNT=$((RETRY_COUNT + 1))
             echo "=== Attempt $RETRY_COUNT of $MAX_RETRIES ==="
@@ -741,13 +959,37 @@ jobs:
             if try_pub_get; then
               echo "✅ flutter pub get succeeded"
 
+              # Jalankan perbaikan kode tanpa menyebabkan exit
+              set +e
+              fix_code_issues
+              FIX_EXIT=$?
+              set -e
+
+              # Baca flag perubahan dari file
+              if [ -f /tmp/changed_flag ]; then
+                CHANGED=$(cat /tmp/changed_flag)
+                rm -f /tmp/changed_flag
+              else
+                CHANGED=0
+              fi
+
+              if [ $CHANGED -eq 1 ]; then
+                echo "Kode telah diperbaiki, jalankan pub get lagi..."
+                if ! flutter pub get; then
+                  echo "❌ pub get gagal setelah perbaikan kode"
+                  # Lanjut ke retry berikutnya
+                  continue
+                fi
+              fi
+
+              # Build
               if [ "$BUILD_MODE" = "release" ]; then
                 if flutter build apk --release; then
                   SUCCESS=true
                   echo "✅ Build successful!"
                   break
                 else
-                  echo "❌ Build failed, attempting to fix..."
+                  echo "❌ Build failed, attempting to fix pubspec..."
                   auto_fix_pubspec
                   rm -rf build .dart_tool
                 fi
@@ -757,13 +999,13 @@ jobs:
                   echo "✅ Build successful!"
                   break
                 else
-                  echo "❌ Build failed, attempting to fix..."
+                  echo "❌ Build failed, attempting to fix pubspec..."
                   auto_fix_pubspec
                   rm -rf build .dart_tool
                 fi
               fi
             else
-              echo "❌ flutter pub get failed, attempting to fix..."
+              echo "❌ flutter pub get failed, attempting to fix pubspec..."
               auto_fix_pubspec
               rm -f pubspec.lock
             fi
